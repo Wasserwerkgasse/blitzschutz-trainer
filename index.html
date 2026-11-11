@@ -293,6 +293,21 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
   * { scroll-behavior: auto !important; }
 }
 
+
+/* Dokumentation: Ausfüllfelder und Formulare (Entwurf 11.11.2026) */
+.doku .feld { display: inline-block; min-width: 12em; height: 1.2em; border-bottom: 1px dotted var(--text-2); vertical-align: bottom; }
+.doku td .feld { min-width: 5em; width: 100%; }
+.doku .klein { font-size: 0.85rem; font-weight: 400; color: var(--text-2); }
+.doku .hinweis-doku { font-size: 0.85rem; color: var(--text-2); }
+.doku .ankreuz { font-size: 1.1em; }
+.doku .mitte { text-align: center; }
+.doku table.formular { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.doku table.formular th, .doku table.formular td { border: 1px solid var(--rand); padding: 4px 6px; text-align: left; vertical-align: top; }
+.doku table.formular th { background: var(--flaeche-2); }
+.doku .liste-ankreuz { list-style: none; padding-left: 0; }
+.doku .anhang { margin-top: 24px; }
+@media (max-width: 600px) { .doku td .feld { min-width: 2.5em; } .doku .feld { min-width: 8em; } }
+
 /* ---------- Druck (Dokumentation) ---------- */
 .nur-druck { display: none; }
 @media print {
@@ -306,6 +321,9 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
   figure, table, .formel, h2, h3 { break-inside: avoid; }
   h2, h3 { break-after: avoid; }
   .doku .bild { max-width: 15cm; }
+  .doku .anhang { break-before: page; }
+  .doku .feld { min-width: 16em; }
+  .doku table.formular tr { break-inside: avoid; }
   a { color: inherit; }
 }
 
@@ -354,6 +372,10 @@ body.buehne .welt3d-buehne { position: absolute; inset: 0; }
 body.buehne .welt3d-buehne canvas { width: 100% !important; height: 100% !important; border: 0; border-radius: 0; }
 body.buehne .welt3d-steuer { position: absolute; top: 12px; left: 12px; margin: 0; z-index: 2; }
 body.buehne .welt3d-steuer button { background: var(--flaeche); }
+/* Doku: 3D-Bild bleibt im Bildfeld, überdeckt den Text nicht (Anzeigefehler 11.11.2026) */
+body.buehne[data-ansicht="doku"] .doku .fig-3d { position: relative; height: 440px; }
+body.buehne[data-ansicht="doku"] .doku .fig-3d .welt3d { top: 28px; overflow: hidden; border-radius: 8px; }
+@media (max-width: 600px) { body.buehne[data-ansicht="doku"] .doku .fig-3d { height: 320px; } }
 body.buehne .objekte3d { position: absolute; top: 68px; left: 12px; margin: 0; z-index: 2; max-width: 300px; background: var(--flaeche); border: 1px solid var(--rand); border-radius: 8px; padding: 0 10px; }
 body.buehne .objekte3d[open] { padding-bottom: 10px; max-height: 50%; overflow: auto; }
 body.buehne .karte3d { top: 130px; left: 12px; z-index: 3; }
@@ -3660,49 +3682,112 @@ body.buehne:is([data-ansicht="auftrag"], [data-ansicht="entscheidung"], [data-an
   }
 
   // ---------- Dokumentation ----------
+  // Dokumentation nach SN 414022 Abschn. 12.6, Folie 46 und SN EN IEC 62305-3 Anhang D.7 (Entwurf abgenommen 11.11.2026).
+  // Felder ohne Wert aus dem Spiel bleiben leer zum Ausfüllen durch die Fachperson, es werden keine Produkte oder Messwerte erfunden.
+  const PRUEFINTERVALL = '10 Jahre'; // Vorgabe Christoph 11.11.2026
   function doku() {
     zustand.ansicht = 'doku';
     const ent = zustand.ent;
     const kw = engine.kennwerte(ent);
     const { szene } = engine.ableiten(ent);
     const L = (eid) => opt(eid, ent[eid]).label;
+    const F = '<span class="feld" aria-label="auszufüllen"></span>';
+    const box = '<span class="ankreuz" aria-hidden="true">☐</span>';
     const stangen = szene.filter((o) => o.typ === 'fangstange');
     const pvSt = stangen.filter((s) => s.id.startsWith('fs-pv'));
+    const hLuft = opt('E4', ent.E4).werte.h;
+    const rohr = opt('E6', ent.E6).werte;
+    const spdW = opt('E9', ent.E9).werte;
+    const einb = ent.E1 === 'B';
     const leiter = ent.E7 === 'M3' ? 'Cu-Draht ø 6 mm (28 mm²)' : ent.E7 === 'M2' ? 'Alu-Draht ø 8 mm (50 mm²)' : 'Cu-Draht ø 8 mm (50 mm²)';
+    const befestigung = { M1: 'auf Dachleitungsstützen', M2: 'auf Dachleitungsstützen', M3: 'direkt auf der Bitumenabdichtung' }[ent.E7];
     const uebergang = { M1: 'Cu-Leiter, Übergang zum Aluminium mit Inox-Klemme', M2: 'Alu-Leiter direkt mit Cu-Klemme an Cu-Fangleitung', M3: 'Cu-Leiter direkt auf der Bitumenabdichtung, Cu-Klemmen' }[ent.E7];
+    const ukText = {
+      U1: 'Profile gestossen, nicht durchgehend',
+      U2: 'Profile verbunden, durchgehend, nicht blitzstromgeprüft',
+      U3: 'blitzstromgeprüft, mit Blitzschutzklemmen – Datenblatt beilegen',
+      U4: 'Profile verbunden, zusätzlich Cu-Leiter ø 8 mm unter dem Feld – Verbindungen Zusatzleiter–UK dokumentieren',
+    }[ent.E2];
+    const lager = SC.zonen.find((zo) => zo.feuergefaehrdet);
     const rhS = rechenhilfe.trennungsabstand(kw, SC);
     const rhL = rechenhilfe.fangstangeLueftung(kw, SC);
     const rhP = rechenhilfe.fangstangenPV(kw, SC, formeln);
+    const nAbl = SC.ableitungen.length;
+    const rohrSchutz = rohr.kranz ? 'Fangkranz oben am Rohr' : rohr.h ? `Fangstange ${z(rohr.h, 1)} m daneben` : 'kein Schutz';
+
+    // Anhang A: Produkte, Mengen aus dem Spiel
+    // Normen je Bauteil (Rückmeldung Christoph 11.11.2026: nicht alles ist LPS-Norm).
+    // SN 414022 nennt die Reihe SN EN 62561 und Teil 1 (Verbindungen); Teile 2, 4 und SN EN 61643-31 sind Fachangabe.
+    const N1 = 'SN EN 62561-1', N2 = 'SN EN 62561-2', N4 = 'SN EN 62561-4', NIN = 'SN 411000 (NIN)';
+    const prod = [
+      ['Fangstange mit Fuss, Lüftung', `1 × ${z(hLuft, 1)} m`, N2],
+      pvSt.length ? ['Fangstange mit Fuss, PV-Feld', `${pvSt.length} × ${z(pvSt[0].h, 1)} m`, N2] : null,
+      rohr.h ? ['Fangstange Entlüftungsrohr', `1 × ${z(rohr.h, 1)} m`, N2] : rohr.kranz ? ['Fangkranz Entlüftungsrohr', '1', N2] : null,
+      [`Dachleitung ${leiter}`, '', N2],
+      ent.E7 !== 'M3' ? ['Dachleitungsstützen', '', N4] : null,
+      ['Klemmen und Verbinder', '', N1],
+      ent.E7 === 'M1' ? ['Übergangsklemme Inox (Cu/Alu)', '', N1] : null,
+      ent.E2 === 'U4' ? ['Zusatzleiter Cu ø 8 mm unter dem Feld', '', N2] : null,
+      ent.E2 === 'U4' ? ['Klemmen Zusatzleiter–UK', '', N1] : null,
+      ['Unterkonstruktion', einb ? 'Nachweis blitzstromgeprüft' : 'nicht im Blitzstrompfad', einb ? `Herstellernachweis, Verbindungen nach ${N1}` : '–'],
+      spdW.typ ? [`SPD DC Typ ${spdW.typ}, UCPV ${spdW.ucpv} V`, '1', 'SN EN 61643-31'] : null,
+      [`PA-Leiter ${esc(L('E10'))}, PA-Schiene`, '', NIN],
+    ].filter(Boolean);
+    const prodZeilen = prod.map(([b, m, n]) => `<tr><td>${b}</td><td>${m || F}</td><td>${F}</td><td>${F}</td><td>${n}</td><td class="mitte">${box}</td></tr>`).join('');
+    const ablZeilen = SC.ableitungen.map((_, i) => `<tr><td>${i + 1}</td><td>${F}</td><td>${F}</td><td class="mitte">${box}</td></tr>`).join('');
 
     zeige(`
       <article class="karte doku">
-        <h1>Dokumentation Blitzschutz PV-Anlage</h1>
-        <p class="kein-druck">Deine Lösung, aufgebaut wie Folie 46.</p>
-        <p class="nur-druck">Blitzschutz-Trainer PVA · Übungsdokumentation · keine echte Anlage</p>
+        <h1>Dokumentation Blitzschutzsystem PV-Anlage</h1>
+        <p class="kein-druck">Deine Lösung, aufgebaut nach SN 414022 Abschn. 12.6 und Folie 46. Leere Felder füllt die Fachperson vor Ort aus.</p>
+        <p class="hinweis-doku">Blitzschutz-Trainer PVA · Übungsdokumentation · keine echte Anlage</p>
+
+        <section>
+          <h2>Deckblatt</h2>
+          <dl class="eckdaten">
+            <dt>Objekt</dt><dd>${esc(SC.titel)}, Adresse ${F}</dd>
+            <dt>Eigentümerschaft</dt><dd>${F}<br><span class="klein">bewahrt die Dokumentation auf (12.1)</span></dd>
+            <dt>Errichter äusserer Blitzschutz</dt><dd>${F}</dd>
+            <dt>Errichter PV und innerer Blitzschutz</dt><dd>${F}</dd>
+            <dt>Verantwortlich für die Unterlagen</dt><dd>${F}<br><span class="klein">bei mehreren Errichtern (12.1)</span></dd>
+            <dt>Art der Arbeit</dt><dd>Erweiterung des bestehenden Blitzschutzes um die PV-Anlage<br><span class="klein">Blitzschutzkonzept und Erdungspläne nachführen (11.6)</span></dd>
+            <dt>Datum, Version</dt><dd>${F}</dd>
+          </dl>
+        </section>
 
         <section>
           <h2>1. Planungsunterlagen</h2>
           <dl class="eckdaten">
-            <dt>Objekt</dt><dd>${esc(SC.titel)}, Blitzschutzklasse ${SC.klasse}</dd>
-            <dt>Gebäude</dt><dd>${SC.gebaeude.l} × ${SC.gebaeude.b} m, Höhe ${SC.gebaeude.h} m, ${SC.ableitungen.length} Ableitungen, Fundamenterder</dd>
+            <dt>Blitzschutzklasse</dt><dd>${SC.klasse} (Gewerbebau mit feuergefährdetem Bereich, Tab. 1)</dd>
+            <dt>Prüfintervall</dt><dd>${PRUEFINTERVALL}</dd>
+            <dt>Blitzkugel, Masche</dt><dd>R = ${SC.R} m, Maschenweite ${SC.masche} m (Tab. 2)</dd>
+            <dt>Gebäude</dt><dd>${SC.gebaeude.l} × ${SC.gebaeude.b} m, Höhe ${SC.gebaeude.h} m, Flachdach mit Bitumenabdichtung, ${nAbl} Ableitungen, Fundamenterder</dd>
+            <dt>Feuergefährdete Zone</dt><dd>${esc(lager.name)}, laut Brandschutzplan (4.42)</dd>
+            <dt>Dachaufbauten</dt><dd>Lüftungsgerät ${z(SC.lueftung.l, 1)} × ${z(SC.lueftung.b, 1)} × ${z(SC.lueftung.h, 1)} m (sicherheitsrelevant); Entlüftungsrohr ø ${z(SC.rohr.d, 2)} m, Höhe ${z(SC.rohr.h, 1)} m</dd>
+            <dt>PV-Feld</dt><dd>${z(kw.pvFeld.l, 1)} × ${z(kw.pvFeld.b, 1)} m (${z(kw.pvFlaeche, 0)} m², rund ${z(kw.pvKwp, 0)} kWp), Höhe ${z(SC.pv.hoehe, 1)} m, UOC max ${SC.pv.uocMax} V, ISC max ${SC.pv.iscMax} A</dd>
             <dt>Konzept</dt><dd>${esc(L('E1'))}</dd>
-            <dt>PV-Feld</dt><dd>${z(kw.pvFeld.l, 1)} × ${z(kw.pvFeld.b, 1)} m (${z(kw.pvFlaeche, 0)} m²)</dd>
-            <dt>Leitungsführung</dt><dd>${esc(L('E8'))}</dd>
           </dl>
+          <h3>Pläne</h3>
+          <p class="klein">Draufsicht mit Fangeinrichtung, Ableitungen, Messstellen und Trennungsabständen; Seitenansicht mit Schutzbereich (62305-3 D.7.2).</p>
           <div class="bild">${bildHtml(ent)}</div>
+          <dl class="eckdaten">
+            <dt>Leitungsweg DC</dt><dd>${esc(L('E8'))}</dd>
+            <dt>Erdungsanlage</dt><dd>Fundamenterder nach SN 414113, Anschlusspunkte an ${nAbl} Ableitungen</dd>
+          </dl>
         </section>
 
         <section>
           <h2>2. Materialauswahl</h2>
           <div class="tabelle-wrap"><table>
-            <tr><th scope="row">Unterkonstruktion</th><td>${esc(L('E2'))}${ent.E2 === 'U3' ? ' – Datenblatt des blitzstromgeprüften Materials beilegen' : ''}</td></tr>
-            <tr><th scope="row">Fangstange Lüftung</th><td>1 × ${z(opt('E4', ent.E4).werte.h, 1)} m</td></tr>
+            <tr><th scope="row">Fang- und Dachleitungen</th><td>${leiter}, ${befestigung}</td></tr>
+            <tr><th scope="row">Materialverträglichkeit</th><td>${esc(uebergang)} (6.5)</td></tr>
+            <tr><th scope="row">Fangstange Lüftung</th><td>1 × ${z(hLuft, 1)} m</td></tr>
             <tr><th scope="row">Fangstangen PV</th><td>${pvSt.length ? `${pvSt.length} × ${z(pvSt[0].h, 1)} m` : 'keine'}</td></tr>
-            <tr><th scope="row">Entlüftungsrohr</th><td>${esc(L('E6'))}</td></tr>
-            <tr><th scope="row">Fang- und Dachleitungen</th><td>${leiter}</td></tr>
-            <tr><th scope="row">Querschnitt Potentialausgleich</th><td>${esc(L('E10'))}</td></tr>
-            <tr><th scope="row">Materialverträglichkeit</th><td>${esc(uebergang)}</td></tr>
+            <tr><th scope="row">Entlüftungsrohr</th><td>${rohrSchutz}</td></tr>
+            <tr><th scope="row">Unterkonstruktion</th><td>${esc(L('E2'))}: ${esc(ukText)}${einb ? '' : '; nicht im Blitzstrompfad'}</td></tr>
+            <tr><th scope="row">Potentialausgleich</th><td>${esc(L('E10'))}</td></tr>
             <tr><th scope="row">Überspannungsschutz DC</th><td>${esc(L('E9'))}</td></tr>
+            <tr><th scope="row">Geprüfte Bauteile</th><td>alle Bauteile nach SN EN 62561 (6.2.1), Nachweise in Anhang A</td></tr>
           </table></div>
         </section>
 
@@ -3713,7 +3798,7 @@ body.buehne:is([data-ansicht="auftrag"], [data-ansicht="entscheidung"], [data-an
           <p>Eingeplanter Abstand: <strong>${z(kw.a, 1)} m</strong></p>
           <h3>Fangstange Lüftung</h3>
           <p class="formel">${esc(rhL.formel)}\n${esc(rhL.werte)}</p>
-          <p>Gewählt: <strong>${z(opt('E4', ent.E4).werte.h, 1)} m</strong></p>
+          <p>Gewählt: <strong>${z(hLuft, 1)} m</strong></p>
           <h3>Fangstangen PV-Feld</h3>
           <p class="formel">${esc(rhP.formel)}\n${esc(rhP.werte)}</p>
           <p>Gewählt: <strong>${pvSt.length ? `${pvSt.length} × ${z(pvSt[0].h, 1)} m` : 'keine'}</strong></p>
@@ -3721,15 +3806,98 @@ body.buehne:is([data-ansicht="auftrag"], [data-ansicht="entscheidung"], [data-an
         </section>
 
         <section>
-          <h2>4. Messungen (durch die Fachperson)</h2>
+          <h2>4. Leitungsführung und Verbindungen</h2>
+          <dl class="eckdaten">
+            <dt>Leitungsführung</dt><dd>Biegeradien, Befestigungsabstände nach Herstellerangabe: ${F}</dd>
+            <dt>Verbindungsstellen</dt><dd>Ort, Klemmentyp, Material, Überlappungen: ${F}</dd>
+            <dt>Verdeckte Teile</dt><dd>vor dem Verdecken prüfen (Durchgang ≤ 1 Ω) und fotografieren (5.1, 12.2, Fig. A.8.5)</dd>
+            <dt>Messstellen</dt><dd>${nAbl} Messstellen, eine bei jedem Anschluss an die Erdungsanlage, gut zugänglich, im Plan nummeriert (7.2.4)</dd>
+          </dl>
+        </section>
+
+        <section>
+          <h2>5. Innerer Blitzschutz und Überspannungsschutz</h2>
+          <dl class="eckdaten">
+            <dt>Potentialausgleich</dt><dd>UK und Generatoranschlusskasten mit ${esc(L('E10'))} an die PA-Schiene</dd>
+            <dt>Leitungsführung DC</dt><dd>${esc(L('E8'))}</dd>
+            <dt>SPD DC</dt><dd>${esc(L('E9'))}; Einbauort ${F}; Anschlussleitungen kurz (8.7.1)</dd>
+            <dt>Vor dem Einbau</dt><dd>Elektroinstallation, Potentialausgleich und Erdung erstellt ${box} (8.7.1)</dd>
+          </dl>
+          <p class="quelle">SPD-Auswahl nach SN 411000 (NIN) Teil 7.12 und SN EN 62305-4. Die NIN ist nicht in den Kursunterlagen dieses Trainers.</p>
+        </section>
+
+        <section>
+          <h2>6. Prüfungen</h2>
           <ul>
-            <li>Durchgangsprüfung aller Anschlusspunkte zum Erdungssystem, Richtwert höchstens 1 Ω</li>
-            <li>Durchgang Fangeinrichtung zu jeder Ableitung und Ableitung zur Erdung</li>
-            <li>Erdübergangswiderstand mit Messgerät, Witterung notieren</li>
-            <li>Sichtkontrolle Fangstangen, Klemmen und Abstände</li>
-            <li>Schlussprüfung mit schriftlichem Prüfbericht und Prüfintervall (Klasse II: 10 Jahre), Blitzschutzattest</li>
+            <li>Baubegleitende Sichtprüfung mit Fotos: Material, geprüfte Bauteile, Verbindungen, Leitungsführung, Abstände, Messstellen (12.2) → Anhang D</li>
+            <li>Messungen direkt nach der Erstellung → Anhang B</li>
+            <li>Schlussprüfung durch eine Fachperson mit schriftlichem Prüfbericht → Anhang C</li>
           </ul>
-          <p class="quelle">Quelle: SN 414022 Abschn. 2.2 (Tab. 1), 12.4, 12.6; Folie 46</p>
+        </section>
+
+        <section>
+          <h2>7. Übergabe</h2>
+          <dl class="eckdaten">
+            <dt>Übergeben an</dt><dd>Eigentümerschaft, Dokumentation und Prüfbericht (12.1, 12.4)</dd>
+            <dt>Datum, Unterschriften</dt><dd>${F}</dd>
+            <dt>Periodische Prüfung</dt><dd>alle ${PRUEFINTERVALL}, zusätzlich nach einem direkten Blitzeinschlag; SPD periodisch kontrollieren (12.5, 8.7.1)</dd>
+          </dl>
+          <p class="quelle">Quellen: SN 414022 Abschn. 5, 7.2.4, 8.5 bis 8.7, 11.6, 12.1 bis 12.6; SN EN IEC 62305-3 Anhang D.7; Folie 46</p>
+        </section>
+
+        <section class="anhang">
+          <h2>Anhang A: Produkte und Nachweise</h2>
+          <div class="tabelle-wrap"><table class="formular">
+            <tr><th>Bauteil</th><th>Menge</th><th>Hersteller</th><th>Typ / Art.-Nr.</th><th>Norm</th><th>Datenblatt</th></tr>
+            ${prodZeilen}
+          </table></div>
+          <p class="quelle">LPS-Bauteile nach der Reihe SN EN 62561 (SN 414022 Abschn. 6.2.1), Verbindungen nach SN EN 62561-1 (Abschn. 6.3.1). Teil 2 Leiter und Fangstangen, Teil 4 Leitungshalter, SN EN 61643-31 SPD für PV sowie NIN für den Potentialausgleich: Fachangabe, nicht Teil der Kursunterlagen.</p>
+        </section>
+
+        <section class="anhang">
+          <h2>Anhang B: Messprotokoll</h2>
+          <dl class="eckdaten">
+            <dt>Datum, Prüfer</dt><dd>${F}</dd>
+            <dt>Messgerät</dt><dd>Typ, Seriennummer, Kalibrierdatum: ${F}</dd>
+            <dt>Messverfahren</dt><dd>${F}</dd>
+          </dl>
+          <h3>Durchgang Fangeinrichtung und Erdung je Ableitung (≤ 1 Ω)</h3>
+          <div class="tabelle-wrap"><table class="formular">
+            <tr><th>Ableitung</th><th>Fangeinrichtung → Ableitung</th><th>Ableitung → Erdung (Messstelle)</th><th>i. O.</th></tr>
+            ${ablZeilen}
+          </table></div>
+          <h3>Weitere Messungen</h3>
+          <div class="tabelle-wrap"><table class="formular">
+            <tr><th>Messung</th><th>Richtwert</th><th>Messwert</th><th>i. O.</th></tr>
+            <tr><td>Durchgang Anschlusspunkte zum Erdungssystem</td><td>≤ 1 Ω</td><td>${F}</td><td class="mitte">${box}</td></tr>
+            <tr><td>Durchgang verdeckte Teile, vor dem Verdecken</td><td>≤ 1 Ω</td><td>${F}</td><td class="mitte">${box}</td></tr>
+            <tr><td>Erdübergangswiderstand gesamt, an mindestens einer Messstelle, vor dem Anschluss an PEN/PA, vorzugsweise 3-Leiter-Verfahren</td><td>in der Regel ≤ 10 Ω</td><td>${F}</td><td class="mitte">${box}</td></tr>
+            <tr><td>Durchgang PA: UK, Generatoranschlusskasten, Wechselrichter → PA-Schiene</td><td>≤ 1 Ω *</td><td>${F}</td><td class="mitte">${box}</td></tr>
+          </table></div>
+          <p>Begründung, falls Richtwerte nicht erreicht werden: ${F}</p>
+          <p class="quelle">Quelle: SN 414022 Abschn. 12.2, 12.3, 12.5, 12.6. * Ergänzung für die PV, in SN 414022 kein eigener Grenzwert.</p>
+        </section>
+
+        <section class="anhang">
+          <h2>Anhang C: Prüfbericht Schlussprüfung</h2>
+          <ul class="liste-ankreuz">
+            <li>${box} Vorgaben und Normen eingehalten</li>
+            <li>${box} Blitzschutzsystem erfüllt seinen Zweck</li>
+            <li>${box} Dokumentation richtig und vollständig</li>
+          </ul>
+          <dl class="eckdaten">
+            <dt>Mängel</dt><dd>${F}</dd>
+            <dt>Prüfintervall</dt><dd>${PRUEFINTERVALL}</dd>
+            <dt>Datum, Fachperson, Unterschrift</dt><dd>${F}</dd>
+          </dl>
+          <p class="quelle">Quelle: SN 414022 Abschn. 12.4</p>
+        </section>
+
+        <section class="anhang">
+          <h2>Anhang D: Fotodokumentation</h2>
+          <p>Fotos mit Ort und Datum: verdeckte Verbindungen, Messstellen, Klemmen, Übergänge Cu/Alu${ent.E2 === 'U4' ? ', Zusatzleiter unter dem Feld' : ''}, SPD-Einbau.</p>
+          <p>${F}</p>
+          <p class="quelle">Quelle: SN 414022 Abschn. 12.2, Fig. A.8.5</p>
         </section>
 
         <div class="knopfreihe">
